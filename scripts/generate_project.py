@@ -67,15 +67,14 @@ select
     now() as built_at
 """
 
+# NB: postgres constant-folds literal 1/0 at plan time even in an untaken
+# CASE branch, so the divisor must come from the flag subquery itself.
 FLAKY_SQL = """\
 select
     {idx} as model_id,
-    case
-        when exists (select 1 from bench_ctl.fail_flags
-                     where model_name = '{name}' and fail)
-        then 1 / 0
-        else 1
-    end as flaky_check,
+    1 / coalesce((select case when fail then 0 else 1 end
+                  from bench_ctl.fail_flags
+                  where model_name = '{name}'), 1) as flaky_check,
     {refs_cols}
     now() as built_at
 """

@@ -71,8 +71,54 @@ Knobs: `just gen 640` regenerates at another size; dbt `threads` and Cosmos
 
 ## Results
 
-_(to be filled from `just metrics` — steady-state table and failure-recovery
-table for N=200 and N=640)_
+Measured 2026-09-12 on an M-series MacBook Pro, N=200 models, dbt `threads: 8`
+= Cosmos `max_active_tasks: 8`, Airflow 3.3 (LocalExecutor) + dbt-core 1.12.4
++ astronomer-cosmos 1.15.1, Postgres 16 in the same compose network. All runs
+`success`; durations from the Airflow metadata DB (`task_instance`,
+`task_instance_history`).
+
+**Steady state** (build all 200 models once):
+
+| shape | Airflow tasks | dbt invocations | task-seconds | wall-clock |
+|---|---:|---:|---:|---:|
+| single batch (`dbt build`) | 1 | 1 | **7.7 s** | **7.7 s** |
+| batch + dbt retry (this repo's operator) | 1 | 1 | **7.4 s** | **7.4 s** |
+| Cosmos per-model (`ExecutionMode.LOCAL`) | 200 | 200 | **577.9 s** | **85.0 s** |
+
+Identical work, **~75× the compute and ~11× the wall-clock** for per-model
+tasks — pure invocation overhead (~2.9 s/task to import Airflow + dbt, parse,
+connect, build one trivial model). This synthetic project parses in ~1 s; on
+the production project that motivated this repo a parse is ~30 s, which is why
+the ratio there was pipeline-abandoning rather than merely ugly. The retry
+operator's steady-state cost is indistinguishable from the plain batch — the
+retry machinery is free until a failure happens.
+
+**Recovery** (make `m_0199` fail at runtime, heal the flag after attempt 1,
+let `retries` recover the run — per-attempt durations):
+
+| shape | attempt 1 | attempt 2 (recovery) | what attempt 2 re-ran |
+|---|---:|---:|---|
+| single batch | 8.0 s (failed) | **8.5 s** | **all 200 models** |
+| batch + dbt retry | 8.5 s (failed) | **2.9 s** | **only `m_0199`** |
+| Cosmos per-model | 2.9 s (failed task) | **3.0 s** | only `m_0199`'s task |
+
+The operator's attempt-2 log, verbatim:
+
+```
+RETRY MODE: previous attempt had 1 failed + 0 skipped of 202 nodes;
+dbt retry re-runs only those. Failed: model.granularity_bench.m_0199
+```
+
+At toy scale 8.5 s vs 2.9 s looks mild; the point is the asymptotics — plain
+batch recovery is O(whole selector), `dbt retry` recovery is O(failures),
+matching Cosmos's per-model retry granularity while keeping the batch's
+steady-state cost. That's the full two-axis picture:
+
+|  | steady state | recovery from k failures |
+|---|---|---|
+| Cosmos per-model | O(N) invocations ✗ | O(k) ✓ |
+| single batch | O(1) invocation ✓ | O(N) ✗ |
+| **batch + dbt retry** | **O(1) ✓** | **O(k) ✓** |
 
 ## Scope notes
 
