@@ -1,0 +1,8 @@
+# Local-first build: reuses any Astro Runtime 3.3 image already on the machine
+# (set BASE_IMAGE) instead of pulling the multi-GB registry base. The stock
+# Dockerfile (astro CLI path) stays the canonical one.
+ARG BASE_IMAGE=astrocrpublic.azurecr.io/runtime:3.3-7
+FROM ${BASE_IMAGE}
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt

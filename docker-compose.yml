@@ -1,0 +1,39 @@
+# astro-CLI-free runner: Postgres + one Airflow 3 `standalone` container
+# (api-server + scheduler + dag-processor + triggerer, LocalExecutor).
+# dbt targets the same Postgres (schema `bench`), so the whole benchmark is
+# two containers and zero cloud.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5442:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  airflow:
+    image: cosmos-bench:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres/postgres
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__PARALLELISM: "16"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+      AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "10"
+      AIRFLOW__API__PORT: "8080"
+      BENCH_PG_HOST: postgres
+    volumes:
+      - ./dags:/usr/local/airflow/dags
+      - ./include:/usr/local/airflow/include
+    ports:
+      - "8080:8080"
+    command: ["airflow", "standalone"]
