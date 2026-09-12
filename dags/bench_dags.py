@@ -67,11 +67,20 @@ if MANIFEST.exists():
         DbtDag,
         ExecutionConfig,
         ExecutionMode,
+        InvocationMode,
         LoadMode,
         ProfileConfig,
         ProjectConfig,
         RenderConfig,
     )
+
+    _PROJECT = ProjectConfig(dbt_project_path=PROJECT_DIR, manifest_path=str(MANIFEST))
+    _PROFILE = ProfileConfig(
+        profile_name="granularity_bench",
+        target_name="bench",
+        profiles_yml_filepath=f"{PROJECT_DIR}/profiles.yml",
+    )
+    _RENDER = RenderConfig(load_method=LoadMode.DBT_MANIFEST)
 
     bench_cosmos_per_model = DbtDag(
         dag_id="bench_cosmos_per_model",
@@ -82,13 +91,47 @@ if MANIFEST.exists():
         max_active_tasks=8,  # match dbt threads=8 in the batch shapes
         default_args=RETRY_ARGS,
         tags=["bench"],
-        project_config=ProjectConfig(dbt_project_path=PROJECT_DIR, manifest_path=str(MANIFEST)),
-        profile_config=ProfileConfig(
-            profile_name="granularity_bench",
-            target_name="bench",
-            profiles_yml_filepath=f"{PROJECT_DIR}/profiles.yml",
-        ),
-        render_config=RenderConfig(load_method=LoadMode.DBT_MANIFEST),
+        project_config=_PROJECT,
+        profile_config=_PROFILE,
+        render_config=_RENDER,
         execution_config=ExecutionConfig(execution_mode=ExecutionMode.LOCAL),
+        operator_args={"install_deps": False},
+    )
+
+    # Same per-model shape, but dbt invoked via the in-process dbtRunner
+    # (skips CLI startup; the per-invocation parse remains).
+    bench_cosmos_dbt_runner = DbtDag(
+        dag_id="bench_cosmos_dbt_runner",
+        schedule=None,
+        start_date=START,
+        catchup=False,
+        max_active_runs=1,
+        max_active_tasks=8,
+        default_args=RETRY_ARGS,
+        tags=["bench"],
+        project_config=_PROJECT,
+        profile_config=_PROFILE,
+        render_config=_RENDER,
+        execution_config=ExecutionConfig(
+            execution_mode=ExecutionMode.LOCAL, invocation_mode=InvocationMode.DBT_RUNNER
+        ),
+        operator_args={"install_deps": False},
+    )
+
+    # Cosmos's own facade mode: ONE producer task runs `dbt build` for the
+    # whole selector; each model gets a lightweight consumer sensor that
+    # mirrors its node status. Invocation cost O(1) + per-model UI states.
+    bench_cosmos_watcher = DbtDag(
+        dag_id="bench_cosmos_watcher",
+        schedule=None,
+        start_date=START,
+        catchup=False,
+        max_active_runs=1,
+        default_args=RETRY_ARGS,
+        tags=["bench"],
+        project_config=_PROJECT,
+        profile_config=_PROFILE,
+        render_config=_RENDER,
+        execution_config=ExecutionConfig(execution_mode=ExecutionMode.WATCHER),
         operator_args={"install_deps": False},
     )

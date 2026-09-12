@@ -141,6 +141,59 @@ while keeping the batch's steady-state cost. That's the full two-axis picture:
 | single batch | O(1) invocation ✓ | O(N) ✗ |
 | **batch + dbt retry** | **O(1) ✓** | **O(k) ✓** |
 
+## Two more Cosmos shapes: InvocationMode.DBT_RUNNER and ExecutionMode.WATCHER
+
+Cosmos 1.15 offers two mitigations worth measuring against the same project:
+
+| shape | tasks | task-seconds | wall-clock |
+|---|---:|---:|---:|
+| single batch | 1 | 7.7 s | 7.7 s |
+| batch + dbt retry | 1 | 7.4 s | 7.4 s |
+| Cosmos LOCAL, subprocess | 200 | 577.9 s | 85.0 s |
+| Cosmos LOCAL, `InvocationMode.DBT_RUNNER` | 200 | 539.7 s | 82.5 s |
+| Cosmos `ExecutionMode.WATCHER` | 201 | 185.6 s | 38.4 s |
+
+**DBT_RUNNER shaves only ~7%.** CLI startup is ~0.2 s of the ~2.9 s per-task
+overhead — the rest is import + parse. Making invocations cheaper doesn't fix
+per-model execution; only not doing N invocations does.
+
+**WATCHER is Cosmos's own facade mode and it largely works** (Airflow 3 +
+Postgres, experimental): ONE producer task runs `dbt build` for the whole
+selector, and each model gets a consumer task that mirrors its node status —
+per-model UI states at O(1) dbt invocations. Its costs here: the producer ran
+the same build in 19.1 s (~2.5× the bare batch — event-streaming overhead)
+and the 200 consumers averaged 0.83 s each, totalling 185.6 task-seconds —
+**24× the compute and 5× the wall-clock of the plain batch**, all task/
+scheduler churn rather than dbt work. On an ephemeral-worker executor
+(KubernetesExecutor) each consumer becomes a pod, which re-imports most of
+the per-model overhead this mode exists to avoid.
+
+**WATCHER's recovery semantics (measured, and genuinely clever):** with one
+model failing transiently, attempt 1's producer fails after the full build
+(19.9 s — unavoidable in any batched shape); on retry the producer *skips
+itself* and only the failed node's task re-runs that single model as a
+standalone invocation (3.4 s while still failing, 1.7 s once healed). So
+WATCHER is O(k) on recovery too — the recovering node pays one full
+per-node invocation (parse included), where `dbt retry` pays one parse for
+all k failures together.
+
+Updated matrix:
+
+|  | steady state | recovery | per-model UI |
+|---|---|---|---|
+| Cosmos per-model | O(N) invocations ✗ | O(k) ✓ | ✓ |
+| Cosmos WATCHER | O(1) invocations, +O(N) consumer tasks (≈24× batch here) | O(k), one invocation per failed node ✓ | ✓ |
+| single batch | O(1) ✓ | O(N) ✗ | ✗ |
+| batch + dbt retry | **O(1) ✓** | **O(k), one invocation total ✓** | ✗ (logs only) |
+
+So the sharpened upstream framing: WATCHER already delivers per-model
+visibility and node-level recovery over a single invocation — what keeps it
+from replacing hand-rolled batches at scale is the O(N) consumer-task churn
+(fatal on ephemeral-worker executors) and the producer's streaming overhead.
+A batched mode that reports per-node results *without* materializing a task
+per node — or a WATCHER whose consumers are free — plus `dbt retry` in the
+producer would close the gap entirely.
+
 ## Scope notes
 
 - LocalExecutor: every shape runs subprocesses on the scheduler container, so
