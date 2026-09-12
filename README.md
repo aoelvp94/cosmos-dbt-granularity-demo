@@ -109,10 +109,31 @@ RETRY MODE: previous attempt had 1 failed + 0 skipped of 202 nodes;
 dbt retry re-runs only those. Failed: model.granularity_bench.m_0199
 ```
 
+**Recovery at k=5** (all five flaky models failing at once, healed after the
+first failure lands):
+
+| shape | attempt 1 | attempt 2 (recovery) | what attempt 2 re-ran | run wall-clock |
+|---|---:|---:|---|---:|
+| single batch | 8.8 s (5 failures) | **7.3 s** | **all 200 models** | 26.9 s |
+| batch + dbt retry | 7.7 s (5 failures) | **2.0 s** | **only the 5 failed** | **20.2 s** |
+| Cosmos per-model | 2.8 s (failed task) | 3.1 s | 1 task | 84.1 s |
+
+Operator log, verbatim: `RETRY MODE: previous attempt had 5 failed + 0
+skipped of 202 nodes; dbt retry re-runs only those. Failed: …m_0196, m_0197,
+m_0200, m_0199, m_0198`.
+
+Honest caveat on the Cosmos row: its 200 tasks spread over ~85 s, so four of
+the five flaky models ran *after* the heal and passed on try 1 — only one
+task actually retried. That temporal dispersion dodging short transients is
+real per-task behavior, but it means this row is effectively k=1; a strict
+k=5 for Cosmos requires holding the flag until all five have failed. Its
+recovery is O(k) by construction either way — its problem is the steady-state
+column.
+
 At toy scale 8.5 s vs 2.9 s looks mild; the point is the asymptotics — plain
-batch recovery is O(whole selector), `dbt retry` recovery is O(failures),
-matching Cosmos's per-model retry granularity while keeping the batch's
-steady-state cost. That's the full two-axis picture:
+batch recovery is O(whole selector), `dbt retry` recovery is O(failures) and
+independent of k while k ≪ N, matching Cosmos's per-model retry granularity
+while keeping the batch's steady-state cost. That's the full two-axis picture:
 
 |  | steady state | recovery from k failures |
 |---|---|---|
