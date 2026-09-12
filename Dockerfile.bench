@@ -6,3 +6,7 @@ FROM ${BASE_IMAGE}
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# py3.14: dbt-core crashes with its own mashumaro<3.18 pin
+# (UnserializableField on JSONObjectSchema); 3.22+ fixes it — force past
+# dbt's constraint, which predates python 3.14.
+RUN pip install --no-cache-dir --no-deps 'mashumaro>=3.22'

@@ -73,7 +73,7 @@ if MANIFEST.exists():
         RenderConfig,
     )
 
-    DbtDag(
+    bench_cosmos_per_model = DbtDag(
         dag_id="bench_cosmos_per_model",
         schedule=None,
         start_date=START,

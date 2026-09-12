@@ -51,7 +51,7 @@ granularity_bench:
   outputs:
     bench:
       type: postgres
-      host: "{{ env_var('BENCH_PG_HOST', 'postgres') }}"
+      host: postgres
       port: 5432
       user: postgres
       password: postgres

@@ -2,8 +2,5 @@
 astronomer-cosmos>=1.10,<2
 dbt-postgres==1.11.0
 dbt-core==1.12.4
-# py3.14 (astro runtime 3.3): dbt-core crashes with mashumaro<3.22
-# (UnserializableField on JSONObjectSchema) — pin the floor explicitly
-mashumaro>=3.22
 
 astro-run-dag # This package is needed for the astro run command. It will be removed before a deploy

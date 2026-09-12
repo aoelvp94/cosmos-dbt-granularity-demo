@@ -36,4 +36,7 @@ services:
       - ./include:/usr/local/airflow/include
     ports:
       - "8080:8080"
+    # bypass the astro entrypoint's wait-for-db nc loop (it can't parse a
+    # plain SQL_ALCHEMY_CONN); postgres readiness is gated by depends_on
+    entrypoint: ["/usr/bin/tini", "--"]
     command: ["airflow", "standalone"]
