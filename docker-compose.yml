@@ -29,6 +29,9 @@ services:
       AIRFLOW__CORE__PARALLELISM: "16"
       AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
       AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "10"
+      # 1000+-task Cosmos DAGs take >30s to render in the processor
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "300"
+      AIRFLOW__DAG_PROCESSOR__DAG_FILE_PROCESSOR_TIMEOUT: "300"
       AIRFLOW__API__PORT: "8080"
       BENCH_PG_HOST: postgres
     volumes:
