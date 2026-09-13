@@ -1,11 +1,14 @@
 # Cosmos dbt task granularity benchmark
 
+In its standard execution modes,
 [astronomer-cosmos](https://github.com/astronomer/astronomer-cosmos) couples
 **task granularity to invocation granularity**: one Airflow task per dbt model
 = one full project parse per model. The common escape (one big `dbt build`
 task) fixes the parse cost but makes every Airflow retry re-run the whole
-selector. This repo measures both, plus the missing third shape: **a batched
-task whose retries run `dbt retry`** — re-running only failed + skipped nodes.
+selector. This repo measures both shapes, Cosmos's own mitigations
+(`InvocationMode.DBT_RUNNER`, `ExecutionMode.WATCHER`), and the missing one:
+**a batched task whose retries run `dbt retry`** — re-running only failed +
+skipped nodes.
 
 Fully local: `docker compose` (Airflow 3 + Postgres), synthetic N-model dbt
 project, no cloud. `just e2e` reproduces everything.
