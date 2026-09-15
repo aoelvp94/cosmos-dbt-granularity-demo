@@ -29,15 +29,16 @@ manifest:
     docker exec "$sch" bash -c 'cd /usr/local/airflow/include/dbt_project && dbt parse --profiles-dir . --target bench'
     docker exec "$sch" ls -la /usr/local/airflow/include/dbt_project/target/manifest.json
 
-# Trigger one shape: cosmos | batch | retry
+# Trigger one shape: cosmos | batch | retry | cosmos-retry
 run shape:
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{shape}}" in
-      cosmos) dag=bench_cosmos_per_model ;;
-      batch)  dag=bench_batch_single ;;
-      retry)  dag=bench_batch_retry ;;
-      *) echo "shape must be cosmos|batch|retry"; exit 1 ;;
+      cosmos)       dag=bench_cosmos_per_model ;;
+      batch)        dag=bench_batch_single ;;
+      retry)        dag=bench_batch_retry ;;
+      cosmos-retry) dag=bench_cosmos_batch_retry ;;
+      *) echo "shape must be cosmos|batch|retry|cosmos-retry"; exit 1 ;;
     esac
     astro dev run dags unpause "$dag" >/dev/null || true
     astro dev run dags trigger "$dag"

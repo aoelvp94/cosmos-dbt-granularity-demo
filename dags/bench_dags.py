@@ -1,4 +1,4 @@
-"""The three execution shapes under benchmark, over the SAME generated dbt project.
+"""The execution shapes under benchmark, over the SAME generated dbt project.
 
 1. ``bench_cosmos_per_model`` — Cosmos ``DbtDag`` in ``ExecutionMode.LOCAL``:
    one Airflow task per dbt model, each task a separate dbt invocation that
@@ -12,6 +12,11 @@
 3. ``bench_batch_retry`` — same single invocation, but retries run
    ``dbt retry`` against persisted state: only failed+skipped nodes re-run.
 
+4. ``bench_cosmos_batch_retry`` — shape 3 expressed as a Cosmos operator
+   (``DbtBuildRetryLocalOperator``) instead of a hand-rolled callable: same
+   O(1)/O(k) behaviour, but running through Cosmos's own local-execution path.
+   This is the shape written to be contributable upstream.
+
 All are schedule=None; trigger via `just run-<shape>`.
 """
 
@@ -23,13 +28,21 @@ from pathlib import Path
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import dag
+from cosmos import ProfileConfig
 
 from include.dbt_batch_retry import run_dbt_batch
+from include.dbt_retry_operator import DbtBuildRetryLocalOperator
 
 PROJECT_DIR = "/usr/local/airflow/include/dbt_project"
 MANIFEST = Path(PROJECT_DIR) / "target" / "manifest.json"
 START = datetime(2026, 1, 1)
 RETRY_ARGS = {"retries": 3, "retry_delay": timedelta(seconds=10)}
+
+_PROFILE = ProfileConfig(
+    profile_name="granularity_bench",
+    target_name="bench",
+    profiles_yml_filepath=f"{PROJECT_DIR}/profiles.yml",
+)
 
 
 @dag(dag_id="bench_batch_single", schedule=None, start_date=START, catchup=False,
@@ -61,7 +74,25 @@ def bench_batch_retry():
 bench_batch_retry()
 
 
-# Cosmos DAG only renders once a manifest exists (just manifest).
+@dag(dag_id="bench_cosmos_batch_retry", schedule=None, start_date=START, catchup=False,
+     max_active_runs=1, default_args=RETRY_ARGS, tags=["bench"])
+def bench_cosmos_batch_retry():
+    DbtBuildRetryLocalOperator(
+        task_id="dbt_build_with_retry",
+        project_dir=PROJECT_DIR,
+        profile_config=_PROFILE,
+        install_deps=False,
+        # Match the other batch shapes: no per-node datasets, and don't slurp
+        # N compiled .sql files into a rendered template field on every run.
+        emit_datasets=False,
+        should_store_compiled_sql=False,
+    )
+
+
+bench_cosmos_batch_retry()
+
+
+# The per-model Cosmos DAGs only render once a manifest exists (just manifest).
 if MANIFEST.exists():
     from cosmos import (
         DbtDag,
@@ -69,17 +100,11 @@ if MANIFEST.exists():
         ExecutionMode,
         InvocationMode,
         LoadMode,
-        ProfileConfig,
         ProjectConfig,
         RenderConfig,
     )
 
     _PROJECT = ProjectConfig(dbt_project_path=PROJECT_DIR, manifest_path=str(MANIFEST))
-    _PROFILE = ProfileConfig(
-        profile_name="granularity_bench",
-        target_name="bench",
-        profiles_yml_filepath=f"{PROJECT_DIR}/profiles.yml",
-    )
     _RENDER = RenderConfig(load_method=LoadMode.DBT_MANIFEST)
 
     bench_cosmos_per_model = DbtDag(
